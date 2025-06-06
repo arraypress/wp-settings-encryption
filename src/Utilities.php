@@ -5,7 +5,7 @@
  * @package     ArrayPress\WP\SettingsEncryption
  * @copyright   Copyright (c) 2025, ArrayPress Limited
  * @license     GPL2+
- * @version     1.0.0
+ * @version     1.2.0
  * @author      David Sherlock
  */
 
@@ -13,21 +13,24 @@ declare( strict_types=1 );
 
 namespace ArrayPress\WP;
 
+use WP_Error;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
  * Get or create the global encryption instance
  *
- * @param string|null $key    Optional. Custom encryption key. Only used on first call.
- * @param string      $prefix Optional. Prefix for encrypted values. Only used on first call.
+ * @param string|null $key             Optional. Custom encryption key. Only used on first call.
+ * @param string      $prefix          Optional. Prefix for encrypted values. Only used on first call.
+ * @param string      $constant_prefix Optional. Prefix for constant names. Only used on first call.
  *
  * @return SettingsEncryption
  */
-function get_encryption_instance( ?string $key = null, string $prefix = '__ENCRYPTED__' ): SettingsEncryption {
+function get_encryption_instance( ?string $key = null, string $prefix = '__ENCRYPTED__', string $constant_prefix = '' ): SettingsEncryption {
 	global $arraypress_encryption;
 
 	if ( ! $arraypress_encryption instanceof SettingsEncryption ) {
-		$arraypress_encryption = new SettingsEncryption( $key, $prefix );
+		$arraypress_encryption = new SettingsEncryption( $key, $prefix, $constant_prefix );
 	}
 
 	return $arraypress_encryption;
@@ -38,9 +41,9 @@ function get_encryption_instance( ?string $key = null, string $prefix = '__ENCRY
  *
  * @param string $value Value to encrypt
  *
- * @return string Encrypted value
+ * @return string|WP_Error Encrypted value or WP_Error on failure
  */
-function encrypt_value( string $value ): string {
+function encrypt_value( string $value ) {
 	return get_encryption_instance()->encrypt( $value );
 }
 
@@ -49,14 +52,15 @@ function encrypt_value( string $value ): string {
  *
  * @param string $value Value to decrypt
  *
- * @return string Decrypted value
+ * @return string|WP_Error Decrypted value or WP_Error on failure
  */
-function decrypt_value( string $value ): string {
+function decrypt_value( string $value ) {
 	return get_encryption_instance()->decrypt( $value );
 }
 
 /**
  * Update a WordPress option with an encrypted value
+ * Automatically checks for constants and skips database storage if constant is defined.
  *
  * @param string $option Option name
  * @param string $value  Value to encrypt and store
@@ -69,6 +73,7 @@ function update_encrypted_option( string $option, string $value ): bool {
 
 /**
  * Get and decrypt a WordPress option
+ * Automatically checks for constants first, then falls back to encrypted database storage.
  *
  * @param string $option  Option name
  * @param string $default Default value if option doesn't exist
@@ -77,6 +82,52 @@ function update_encrypted_option( string $option, string $value ): bool {
  */
 function get_encrypted_option( string $option, string $default = '' ): string {
 	return get_encryption_instance()->get_option( $option, $default );
+}
+
+/**
+ * Get option information including source and encryption status
+ *
+ * @param string $option  Option name
+ * @param string $default Default value
+ *
+ * @return array Array with 'value', 'source', and additional info
+ */
+function get_encrypted_option_info( string $option, string $default = '' ): array {
+	return get_encryption_instance()->get_option_info( $option, $default );
+}
+
+/**
+ * Check if an option is defined as a constant
+ *
+ * @param string $option Option name
+ *
+ * @return bool Whether the option has a constant defined
+ */
+function is_option_constant_defined( string $option ): bool {
+	return get_encryption_instance()->is_constant_defined( $option );
+}
+
+/**
+ * Get the constant name for an option
+ *
+ * @param string $option Option name
+ *
+ * @return string Constant name that would be checked
+ */
+function get_option_constant_name( string $option ): string {
+	return get_encryption_instance()->get_constant_name( $option );
+}
+
+/**
+ * Generate setting description for admin interfaces
+ *
+ * @param string $option    Option name
+ * @param string $base_desc Base description text
+ *
+ * @return string Enhanced description with constant information
+ */
+function get_encrypted_setting_description( string $option, string $base_desc ): string {
+	return get_encryption_instance()->get_setting_description( $option, $base_desc );
 }
 
 /**
@@ -119,7 +170,7 @@ function update_encrypted_user_meta( int $user_id, string $meta_key, string $met
 /**
  * Get and decrypt user meta
  *
- * @param int    $user_id User ID
+ * @param int    $user_id  User ID
  * @param string $meta_key Meta key
  * @param string $default  Default value if meta doesn't exist
  *
@@ -145,7 +196,7 @@ function update_encrypted_post_meta( int $post_id, string $meta_key, string $met
 /**
  * Get and decrypt post meta
  *
- * @param int    $post_id Post ID
+ * @param int    $post_id  Post ID
  * @param string $meta_key Meta key
  * @param string $default  Default value if meta doesn't exist
  *
@@ -164,4 +215,18 @@ function get_encrypted_post_meta( int $post_id, string $meta_key, string $defaul
  */
 function is_value_encrypted( string $value ): bool {
 	return get_encryption_instance()->is_encrypted( $value );
+}
+
+/**
+ * Create a new encryption instance with specific configuration
+ * Useful when you need multiple instances with different settings.
+ *
+ * @param string|null $key             Optional. Custom encryption key.
+ * @param string      $prefix          Optional. Prefix for encrypted values.
+ * @param string      $constant_prefix Optional. Prefix for constant names.
+ *
+ * @return SettingsEncryption
+ */
+function create_encryption_instance( ?string $key = null, string $prefix = '__ENCRYPTED__', string $constant_prefix = '' ): SettingsEncryption {
+	return new SettingsEncryption( $key, $prefix, $constant_prefix );
 }

@@ -1,11 +1,11 @@
 <?php
 /**
- * WordPress Settings Encryption
+ * WordPress Settings Encryption with Automatic Constant Detection
  *
  * @package     ArrayPress\WP\SettingsEncryption
  * @copyright   Copyright (c) 2025, ArrayPress Limited
  * @license     GPL2+
- * @version     1.0.0
+ * @version     1.2.0
  * @author      David Sherlock
  */
 
@@ -22,8 +22,8 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Class SettingsEncryption
  *
- * Simple utility for encrypting and decrypting WordPress options and settings.
- * Provides secure storage for sensitive data like API keys, passwords, and tokens.
+ * Automatically checks for WordPress constants before falling back to encrypted database storage.
+ * Constants are detected by converting option names to uppercase (e.g., 'api_key' -> 'API_KEY').
  */
 class SettingsEncryption {
 
@@ -49,17 +49,73 @@ class SettingsEncryption {
 	private string $prefix;
 
 	/**
+	 * Prefix for constant names (optional)
+	 *
+	 * @var string
+	 */
+	private string $constant_prefix;
+
+	/**
 	 * Constructor
 	 *
-	 * @param string|null $key    Optional. Custom encryption key. If null, use WordPress salts.
-	 * @param string      $prefix Optional. Prefix for encrypted values. Default '__ENCRYPTED__'.
+	 * @param string|null $key             Optional. Custom encryption key. If null, use WordPress salts.
+	 * @param string      $prefix          Optional. Prefix for encrypted values. Default '__ENCRYPTED__'.
+	 * @param string      $constant_prefix Optional. Prefix for constant names. Default empty.
 	 *
 	 * @throws RuntimeException If OpenSSL extension is not available or the algorithm is not supported.
 	 */
-	public function __construct( ?string $key = null, string $prefix = '__ENCRYPTED__' ) {
-		$this->key    = $key ? hash( 'sha256', $key, true ) : $this->get_wordpress_key();
-		$this->prefix = $prefix;
+	public function __construct( ?string $key = null, string $prefix = '__ENCRYPTED__', string $constant_prefix = '' ) {
+		$this->key             = $key ? hash( 'sha256', $key, true ) : $this->get_wordpress_key();
+		$this->prefix          = $prefix;
+		$this->constant_prefix = $constant_prefix;
 		$this->validate_environment();
+	}
+
+	/**
+	 * Convert option name to constant name
+	 *
+	 * @param string $option_name Option name (e.g., 'wc_r2_api_key')
+	 *
+	 * @return string Constant name (e.g., 'WC_R2_API_KEY' or 'MY_PREFIX_WC_R2_API_KEY')
+	 */
+	private function option_to_constant( string $option_name ): string {
+		$constant_name = strtoupper( $option_name );
+
+		if ( ! empty( $this->constant_prefix ) ) {
+			$constant_name = strtoupper( $this->constant_prefix ) . $constant_name;
+		}
+
+		return $constant_name;
+	}
+
+	/**
+	 * Check if a constant exists for an option
+	 *
+	 * @param string $option_name Option name
+	 *
+	 * @return bool Whether the constant is defined and not empty
+	 */
+	private function has_constant_for_option( string $option_name ): bool {
+		$constant_name = $this->option_to_constant( $option_name );
+
+		return defined( $constant_name ) && ! empty( constant( $constant_name ) );
+	}
+
+	/**
+	 * Get constant value for an option
+	 *
+	 * @param string $option_name Option name
+	 *
+	 * @return string|null Constant value or null if not defined
+	 */
+	private function get_constant_for_option( string $option_name ): ?string {
+		$constant_name = $this->option_to_constant( $option_name );
+
+		if ( defined( $constant_name ) && ! empty( constant( $constant_name ) ) ) {
+			return constant( $constant_name );
+		}
+
+		return null;
 	}
 
 	/**
@@ -129,6 +185,7 @@ class SettingsEncryption {
 
 	/**
 	 * Update a WordPress option with an encrypted value
+	 * Will not update if a constant is defined for this option.
 	 *
 	 * @param string $option Option name
 	 * @param string $value  Value to encrypt and store
@@ -136,6 +193,11 @@ class SettingsEncryption {
 	 * @return bool Whether the option was updated successfully
 	 */
 	public function update_option( string $option, string $value ): bool {
+		// Don't save to database if constant is defined
+		if ( $this->has_constant_for_option( $option ) ) {
+			return false;
+		}
+
 		$encrypted = $this->encrypt( $value );
 
 		// Handle encryption errors
@@ -148,6 +210,7 @@ class SettingsEncryption {
 
 	/**
 	 * Get and decrypt a WordPress option
+	 * Automatically checks for constants first.
 	 *
 	 * @param string $option  Option name
 	 * @param string $default Default value if option doesn't exist
@@ -155,6 +218,13 @@ class SettingsEncryption {
 	 * @return string Decrypted option value or default if error
 	 */
 	public function get_option( string $option, string $default = '' ): string {
+		// Check constant first
+		$constant_value = $this->get_constant_for_option( $option );
+		if ( $constant_value !== null ) {
+			return $constant_value;
+		}
+
+		// Fall back to database option
 		$value = get_option( $option, $default );
 
 		if ( ! is_string( $value ) ) {
@@ -169,6 +239,92 @@ class SettingsEncryption {
 		}
 
 		return $decrypted;
+	}
+
+	/**
+	 * Get option info including source
+	 *
+	 * @param string $option  Option name
+	 * @param string $default Default value
+	 *
+	 * @return array Array with 'value', 'source', and additional info
+	 */
+	public function get_option_info( string $option, string $default = '' ): array {
+		// Check constant first
+		$constant_value = $this->get_constant_for_option( $option );
+		if ( $constant_value !== null ) {
+			return [
+				'value'        => $constant_value,
+				'source'       => 'constant',
+				'constant'     => $this->option_to_constant( $option ),
+				'is_encrypted' => false,
+			];
+		}
+
+		// Check database option
+		$option_value = get_option( $option, null );
+		if ( $option_value !== null ) {
+			$decrypted = $this->decrypt( $option_value );
+			if ( ! is_wp_error( $decrypted ) ) {
+				return [
+					'value'        => $decrypted,
+					'source'       => 'database',
+					'option'       => $option,
+					'is_encrypted' => $this->is_encrypted( $option_value ),
+				];
+			}
+		}
+
+		// Return default
+		return [
+			'value'        => $default,
+			'source'       => 'default',
+			'is_encrypted' => false,
+		];
+	}
+
+	/**
+	 * Check if an option is defined as a constant
+	 *
+	 * @param string $option Option name
+	 *
+	 * @return bool Whether the option has a constant defined
+	 */
+	public function is_constant_defined( string $option ): bool {
+		return $this->has_constant_for_option( $option );
+	}
+
+	/**
+	 * Get the constant name for an option
+	 *
+	 * @param string $option Option name
+	 *
+	 * @return string Constant name that would be checked
+	 */
+	public function get_constant_name( string $option ): string {
+		return $this->option_to_constant( $option );
+	}
+
+	/**
+	 * Generate setting description for admin interfaces
+	 *
+	 * @param string $option    Option name
+	 * @param string $base_desc Base description text
+	 *
+	 * @return string Enhanced description with constant information
+	 */
+	public function get_setting_description( string $option, string $base_desc ): string {
+		if ( $this->is_constant_defined( $option ) ) {
+			$constant_name = $this->get_constant_name( $option );
+
+			return $base_desc . sprintf(
+					' <strong>%s</strong> <code>%s</code>',
+					__( 'Defined as constant:', 'arraypress' ),
+					$constant_name
+				);
+		}
+
+		return $base_desc . ' ' . __( '(stored encrypted in database)', 'arraypress' );
 	}
 
 	/**
@@ -347,7 +503,7 @@ class SettingsEncryption {
 
 		// Fallback to wp_salt if no constants defined
 		if ( empty( $combined ) && function_exists( 'wp_salt' ) ) {
-			$combined = wp_salt( 'auth' ) . wp_salt( 'secure_auth' );
+			$combined = wp_salt() . wp_salt( 'secure_auth' );
 		}
 
 		// Final fallback
