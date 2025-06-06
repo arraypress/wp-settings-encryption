@@ -5,7 +5,7 @@
  * @package     ArrayPress\WP\SettingsEncryption
  * @copyright   Copyright (c) 2025, ArrayPress Limited
  * @license     GPL2+
- * @version     1.2.0
+ * @version     1.3.0
  * @author      David Sherlock
  */
 
@@ -20,17 +20,19 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Get or create the global encryption instance
  *
- * @param string|null $key         Optional. Custom encryption key. Only used on first call.
- * @param string      $prefix      Optional. Prefix for encrypted values. Only used on first call.
- * @param string      $prefix_name Optional. Prefix for option and constant names. Only used on first call.
+ * @param string|null $key            Optional. Custom encryption key. Only used on first call.
+ * @param string      $prefix         Optional. Prefix for encrypted values. Only used on first call.
+ * @param string      $prefix_name    Optional. Prefix for option and constant names. Only used on first call.
+ * @param bool        $auto_intercept Optional. Whether to automatically intercept get_option calls. Only used on first
+ *                                    call.
  *
  * @return SettingsEncryption
  */
-function get_encryption_instance( ?string $key = null, string $prefix = '__ENCRYPTED__', string $prefix_name = '' ): SettingsEncryption {
+function get_encryption_instance( ?string $key = null, string $prefix = '__ENCRYPTED__', string $prefix_name = '', bool $auto_intercept = false ): SettingsEncryption {
 	global $arraypress_encryption;
 
 	if ( ! $arraypress_encryption instanceof SettingsEncryption ) {
-		$arraypress_encryption = new SettingsEncryption( $key, $prefix, $prefix_name );
+		$arraypress_encryption = new SettingsEncryption( $key, $prefix, $prefix_name, $auto_intercept );
 	}
 
 	return $arraypress_encryption;
@@ -62,7 +64,7 @@ function decrypt_value( string $value ) {
  * Update a WordPress option with an encrypted value
  * Automatically checks for constants and skips database storage if constant is defined.
  *
- * @param string $option Option name
+ * @param string $option Option name (without prefix)
  * @param string $value  Value to encrypt and store
  *
  * @return bool Whether the option was updated successfully
@@ -75,7 +77,7 @@ function update_encrypted_option( string $option, string $value ): bool {
  * Get and decrypt a WordPress option
  * Automatically checks for constants first, then falls back to encrypted database storage.
  *
- * @param string $option  Option name
+ * @param string $option  Option name (without prefix)
  * @param string $default Default value if option doesn't exist
  *
  * @return string Decrypted option value
@@ -87,7 +89,7 @@ function get_encrypted_option( string $option, string $default = '' ): string {
 /**
  * Get option information including source and encryption status
  *
- * @param string $option  Option name
+ * @param string $option  Option name (without prefix)
  * @param string $default Default value
  *
  * @return array Array with 'value', 'source', and additional info
@@ -99,7 +101,7 @@ function get_encrypted_option_info( string $option, string $default = '' ): arra
 /**
  * Check if an option is defined as a constant
  *
- * @param string $option Option name
+ * @param string $option Option name (without prefix)
  *
  * @return bool Whether the option has a constant defined
  */
@@ -110,13 +112,42 @@ function is_option_constant_defined( string $option ): bool {
 /**
  * Generate setting description for admin interfaces
  *
- * @param string $option    Option name
+ * @param string $option    Option name (without prefix)
  * @param string $base_desc Base description text
  *
  * @return string Enhanced description with constant information
  */
 function get_encrypted_setting_description( string $option, string $base_desc ): string {
 	return get_encryption_instance()->get_setting_description( $option, $base_desc );
+}
+
+/**
+ * Track an option for auto-interception
+ *
+ * @param string $option Option name (without prefix)
+ *
+ * @return void
+ */
+function track_encrypted_option( string $option ): void {
+	get_encryption_instance()->track_option( $option );
+}
+
+/**
+ * Enable auto-interception for tracked options
+ *
+ * @return void
+ */
+function enable_option_auto_interception(): void {
+	get_encryption_instance()->enable_auto_interception();
+}
+
+/**
+ * Disable auto-interception for tracked options
+ *
+ * @return void
+ */
+function disable_option_auto_interception(): void {
+	get_encryption_instance()->disable_auto_interception();
 }
 
 /**
@@ -228,5 +259,20 @@ function test_encryption(): bool {
  * @return bool Whether WP_ENCRYPTION_KEY constant is defined
  */
 function has_dedicated_encryption_key(): bool {
-	return defined( 'WP_ENCRYPTION_KEY' ) && ! empty( WP_ENCRYPTION_KEY );
+	return defined( 'WP_ENCRYPTION_KEY' ) && ! empty( constant( 'WP_ENCRYPTION_KEY' ) );
+}
+
+/**
+ * Create a new encryption instance with specific configuration
+ * Useful when you need multiple instances with different settings.
+ *
+ * @param string|null $key            Optional. Custom encryption key.
+ * @param string      $prefix         Optional. Prefix for encrypted values.
+ * @param string      $prefix_name    Optional. Prefix for option and constant names.
+ * @param bool        $auto_intercept Optional. Whether to automatically intercept get_option calls.
+ *
+ * @return SettingsEncryption
+ */
+function create_encryption_instance( ?string $key = null, string $prefix = '__ENCRYPTED__', string $prefix_name = '', bool $auto_intercept = false ): SettingsEncryption {
+	return new SettingsEncryption( $key, $prefix, $prefix_name, $auto_intercept );
 }

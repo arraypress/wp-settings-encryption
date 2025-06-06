@@ -1,11 +1,11 @@
 <?php
 /**
- * WordPress Settings Encryption with Automatic Constant Detection
+ * WordPress Settings Encryption with Automatic Option Interception
  *
  * @package     ArrayPress\WP\SettingsEncryption
  * @copyright   Copyright (c) 2025, ArrayPress Limited
  * @license     GPL2+
- * @version     1.2.0
+ * @version     1.3.0
  * @author      David Sherlock
  */
 
@@ -23,7 +23,7 @@ defined( 'ABSPATH' ) || exit;
  * Class SettingsEncryption
  *
  * Automatically checks for WordPress constants before falling back to encrypted database storage.
- * Constants are detected by converting option names to uppercase (e.g., 'api_key' -> 'API_KEY').
+ * Features auto-interception of get_option() calls to return decrypted values seamlessly.
  */
 class SettingsEncryption {
 
@@ -56,19 +56,40 @@ class SettingsEncryption {
 	private string $prefix_name;
 
 	/**
+	 * Whether to auto-intercept get_option calls
+	 *
+	 * @var bool
+	 */
+	private bool $auto_intercept;
+
+	/**
+	 * Tracked option names for auto-interception
+	 *
+	 * @var array
+	 */
+	private array $tracked_options = [];
+
+	/**
 	 * Constructor
 	 *
-	 * @param string|null $key         Optional. Custom encryption key. If null, use WordPress salts.
-	 * @param string      $prefix      Optional. Prefix for encrypted values. Default '__ENCRYPTED__'.
-	 * @param string      $prefix_name Optional. Prefix for option and constant names (e.g., 'wc_r2_'). Default empty.
+	 * @param string|null $key            Optional. Custom encryption key. If null, use WordPress salts.
+	 * @param string      $prefix         Optional. Prefix for encrypted values. Default '__ENCRYPTED__'.
+	 * @param string      $prefix_name    Optional. Prefix for option and constant names (e.g., 'wc_r2_'). Default
+	 *                                    empty.
+	 * @param bool        $auto_intercept Optional. Whether to automatically intercept get_option calls. Default false.
 	 *
 	 * @throws RuntimeException If OpenSSL extension is not available or the algorithm is not supported.
 	 */
-	public function __construct( ?string $key = null, string $prefix = '__ENCRYPTED__', string $prefix_name = '' ) {
-		$this->key         = $key ? hash( 'sha256', $key, true ) : $this->get_wordpress_key();
-		$this->prefix      = $prefix;
-		$this->prefix_name = $prefix_name;
+	public function __construct( ?string $key = null, string $prefix = '__ENCRYPTED__', string $prefix_name = '', bool $auto_intercept = false ) {
+		$this->key            = $key ? hash( 'sha256', $key, true ) : $this->get_wordpress_key();
+		$this->prefix         = $prefix;
+		$this->prefix_name    = $prefix_name;
+		$this->auto_intercept = $auto_intercept;
 		$this->validate_environment();
+
+		if ( $this->auto_intercept ) {
+			$this->setup_auto_interception();
+		}
 	}
 
 	/**
@@ -218,6 +239,11 @@ class SettingsEncryption {
 
 		$full_option_name = $this->get_full_option_name( $option );
 
+		// Track this option for auto-interception if enabled
+		if ( $this->auto_intercept ) {
+			$this->track_option( $option );
+		}
+
 		return update_option( $full_option_name, $encrypted );
 	}
 
@@ -301,7 +327,7 @@ class SettingsEncryption {
 	/**
 	 * Check if an option is defined as a constant
 	 *
-	 * @param string $option Option name
+	 * @param string $option Option name (without prefix)
 	 *
 	 * @return bool Whether the option has a constant defined
 	 */
@@ -312,7 +338,7 @@ class SettingsEncryption {
 	/**
 	 * Get the constant name for an option
 	 *
-	 * @param string $option Option name
+	 * @param string $option Option name (without prefix)
 	 *
 	 * @return string Constant name that would be checked
 	 */
@@ -323,7 +349,7 @@ class SettingsEncryption {
 	/**
 	 * Generate setting description for admin interfaces
 	 *
-	 * @param string $option    Option name
+	 * @param string $option    Option name (without prefix)
 	 * @param string $base_desc Base description text
 	 *
 	 * @return string Enhanced description with constant information
@@ -340,6 +366,91 @@ class SettingsEncryption {
 		}
 
 		return $base_desc . ' ' . __( '(stored encrypted in database)', 'your-textdomain' );
+	}
+
+	/**
+	 * Setup automatic interception of get_option calls
+	 *
+	 * @return void
+	 */
+	private function setup_auto_interception(): void {
+		// This will be called when options are tracked
+	}
+
+	/**
+	 * Track an option for auto-interception
+	 *
+	 * @param string $option Option name (without prefix)
+	 *
+	 * @return void
+	 */
+	public function track_option( string $option ): void {
+		if ( ! in_array( $option, $this->tracked_options, true ) ) {
+			$this->tracked_options[] = $option;
+			$full_option_name        = $this->get_full_option_name( $option );
+			add_filter( "pre_option_{$full_option_name}", [ $this, 'intercept_option_value' ], 10, 1 );
+		}
+	}
+
+	/**
+	 * Intercept option values to return decrypted data
+	 *
+	 * @param mixed $value The option value
+	 *
+	 * @return mixed
+	 */
+	public function intercept_option_value( $value ) {
+		// Get the option name from the current filter
+		$full_option_name = str_replace( 'pre_option_', '', current_filter() );
+
+		// Extract the base name (remove prefix)
+		$base_name = '';
+		if ( ! empty( $this->prefix_name ) ) {
+			$base_name = str_replace( $this->prefix_name, '', $full_option_name );
+		} else {
+			$base_name = $full_option_name;
+		}
+
+		// Temporarily remove our filter to prevent infinite loop
+		remove_filter( current_filter(), [ $this, 'intercept_option_value' ], 10 );
+
+		// Get the decrypted value using our method
+		$decrypted_value = $this->get_option( $base_name, '' );
+
+		// Re-add our filter
+		add_filter( current_filter(), [ $this, 'intercept_option_value' ], 10, 1 );
+
+		return $decrypted_value;
+	}
+
+	/**
+	 * Enable auto-interception for existing tracked options
+	 *
+	 * @return void
+	 */
+	public function enable_auto_interception(): void {
+		$this->auto_intercept = true;
+
+		// Set up filters for already tracked options
+		foreach ( $this->tracked_options as $option ) {
+			$full_option_name = $this->get_full_option_name( $option );
+			add_filter( "pre_option_{$full_option_name}", [ $this, 'intercept_option_value' ], 10, 1 );
+		}
+	}
+
+	/**
+	 * Disable auto-interception
+	 *
+	 * @return void
+	 */
+	public function disable_auto_interception(): void {
+		$this->auto_intercept = false;
+
+		// Remove filters for tracked options
+		foreach ( $this->tracked_options as $option ) {
+			$full_option_name = $this->get_full_option_name( $option );
+			remove_filter( "pre_option_{$full_option_name}", [ $this, 'intercept_option_value' ], 10 );
+		}
 	}
 
 	/**
@@ -508,8 +619,8 @@ class SettingsEncryption {
 	 */
 	private function get_wordpress_key(): string {
 		// Priority 1: Dedicated encryption key constant (recommended for production)
-		if ( defined( 'WP_ENCRYPTION_KEY' ) && ! empty( WP_ENCRYPTION_KEY ) ) {
-			return hash( 'sha256', WP_ENCRYPTION_KEY, true );
+		if ( defined( 'WP_ENCRYPTION_KEY' ) && ! empty( constant( 'WP_ENCRYPTION_KEY' ) ) ) {
+			return hash( 'sha256', constant( 'WP_ENCRYPTION_KEY' ), true );
 		}
 
 		// Priority 2: Use WordPress salts (will break if salts change)
