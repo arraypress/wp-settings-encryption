@@ -49,43 +49,54 @@ class SettingsEncryption {
 	private string $prefix;
 
 	/**
-	 * Prefix for constant names (optional)
+	 * Prefix for option and constant names
 	 *
 	 * @var string
 	 */
-	private string $constant_prefix;
+	private string $prefix_name;
 
 	/**
 	 * Constructor
 	 *
-	 * @param string|null $key             Optional. Custom encryption key. If null, use WordPress salts.
-	 * @param string      $prefix          Optional. Prefix for encrypted values. Default '__ENCRYPTED__'.
-	 * @param string      $constant_prefix Optional. Prefix for constant names. Default empty.
+	 * @param string|null $key         Optional. Custom encryption key. If null, use WordPress salts.
+	 * @param string      $prefix      Optional. Prefix for encrypted values. Default '__ENCRYPTED__'.
+	 * @param string      $prefix_name Optional. Prefix for option and constant names (e.g., 'wc_r2_'). Default empty.
 	 *
 	 * @throws RuntimeException If OpenSSL extension is not available or the algorithm is not supported.
 	 */
-	public function __construct( ?string $key = null, string $prefix = '__ENCRYPTED__', string $constant_prefix = '' ) {
-		$this->key             = $key ? hash( 'sha256', $key, true ) : $this->get_wordpress_key();
-		$this->prefix          = $prefix;
-		$this->constant_prefix = $constant_prefix;
+	public function __construct( ?string $key = null, string $prefix = '__ENCRYPTED__', string $prefix_name = '' ) {
+		$this->key         = $key ? hash( 'sha256', $key, true ) : $this->get_wordpress_key();
+		$this->prefix      = $prefix;
+		$this->prefix_name = $prefix_name;
 		$this->validate_environment();
+	}
+
+	/**
+	 * Convert option name to full option name with prefix
+	 *
+	 * @param string $option_name Option name (e.g., 'account_id')
+	 *
+	 * @return string Full option name (e.g., 'wc_r2_account_id')
+	 */
+	private function get_full_option_name( string $option_name ): string {
+		if ( ! empty( $this->prefix_name ) ) {
+			return $this->prefix_name . $option_name;
+		}
+
+		return $option_name;
 	}
 
 	/**
 	 * Convert option name to constant name
 	 *
-	 * @param string $option_name Option name (e.g., 'wc_r2_api_key')
+	 * @param string $option_name Option name (e.g., 'account_id')
 	 *
-	 * @return string Constant name (e.g., 'WC_R2_API_KEY' or 'MY_PREFIX_WC_R2_API_KEY')
+	 * @return string Constant name (e.g., 'WC_R2_ACCOUNT_ID')
 	 */
 	private function option_to_constant( string $option_name ): string {
-		$constant_name = strtoupper( $option_name );
+		$full_option_name = $this->get_full_option_name( $option_name );
 
-		if ( ! empty( $this->constant_prefix ) ) {
-			$constant_name = strtoupper( $this->constant_prefix ) . $constant_name;
-		}
-
-		return $constant_name;
+		return strtoupper( $full_option_name );
 	}
 
 	/**
@@ -187,7 +198,7 @@ class SettingsEncryption {
 	 * Update a WordPress option with an encrypted value
 	 * Will not update if a constant is defined for this option.
 	 *
-	 * @param string $option Option name
+	 * @param string $option Option name (without prefix)
 	 * @param string $value  Value to encrypt and store
 	 *
 	 * @return bool Whether the option was updated successfully
@@ -205,14 +216,16 @@ class SettingsEncryption {
 			return false;
 		}
 
-		return update_option( $option, $encrypted );
+		$full_option_name = $this->get_full_option_name( $option );
+
+		return update_option( $full_option_name, $encrypted );
 	}
 
 	/**
 	 * Get and decrypt a WordPress option
 	 * Automatically checks for constants first.
 	 *
-	 * @param string $option  Option name
+	 * @param string $option  Option name (without prefix)
 	 * @param string $default Default value if option doesn't exist
 	 *
 	 * @return string Decrypted option value or default if error
@@ -225,7 +238,8 @@ class SettingsEncryption {
 		}
 
 		// Fall back to database option
-		$value = get_option( $option, $default );
+		$full_option_name = $this->get_full_option_name( $option );
+		$value            = get_option( $full_option_name, $default );
 
 		if ( ! is_string( $value ) ) {
 			return $default;
@@ -244,7 +258,7 @@ class SettingsEncryption {
 	/**
 	 * Get option info including source
 	 *
-	 * @param string $option  Option name
+	 * @param string $option  Option name (without prefix)
 	 * @param string $default Default value
 	 *
 	 * @return array Array with 'value', 'source', and additional info
@@ -262,14 +276,15 @@ class SettingsEncryption {
 		}
 
 		// Check database option
-		$option_value = get_option( $option, null );
+		$full_option_name = $this->get_full_option_name( $option );
+		$option_value     = get_option( $full_option_name, null );
 		if ( $option_value !== null ) {
 			$decrypted = $this->decrypt( $option_value );
 			if ( ! is_wp_error( $decrypted ) ) {
 				return [
 					'value'        => $decrypted,
 					'source'       => 'database',
-					'option'       => $option,
+					'option'       => $full_option_name,
 					'is_encrypted' => $this->is_encrypted( $option_value ),
 				];
 			}
@@ -319,12 +334,12 @@ class SettingsEncryption {
 
 			return $base_desc . sprintf(
 					' <strong>%s</strong> <code>%s</code>',
-					__( 'Defined as constant:', 'arraypress' ),
+					__( 'Defined as constant:', 'your-textdomain' ),
 					$constant_name
 				);
 		}
 
-		return $base_desc . ' ' . __( '(stored encrypted in database)', 'arraypress' );
+		return $base_desc . ' ' . __( '(stored encrypted in database)', 'your-textdomain' );
 	}
 
 	/**
@@ -489,9 +504,15 @@ class SettingsEncryption {
 	 * Get the WordPress-based encryption key
 	 *
 	 * @return string WordPress-derived encryption key
-	 * @throws RuntimeException If WordPress salts are not available
+	 * @throws RuntimeException If no key source is available
 	 */
 	private function get_wordpress_key(): string {
+		// Priority 1: Dedicated encryption key constant (recommended for production)
+		if ( defined( 'WP_ENCRYPTION_KEY' ) && ! empty( WP_ENCRYPTION_KEY ) ) {
+			return hash( 'sha256', WP_ENCRYPTION_KEY, true );
+		}
+
+		// Priority 2: Use WordPress salts (will break if salts change)
 		$salts = [
 			defined( 'AUTH_KEY' ) ? AUTH_KEY : '',
 			defined( 'SECURE_AUTH_KEY' ) ? SECURE_AUTH_KEY : '',
@@ -503,12 +524,12 @@ class SettingsEncryption {
 
 		// Fallback to wp_salt if no constants defined
 		if ( empty( $combined ) && function_exists( 'wp_salt' ) ) {
-			$combined = wp_salt() . wp_salt( 'secure_auth' );
+			$combined = wp_salt( 'auth' ) . wp_salt( 'secure_auth' );
 		}
 
-		// Final fallback
+		// Final check
 		if ( empty( $combined ) ) {
-			throw new RuntimeException( 'Cannot generate encryption key: WordPress salts not available' );
+			throw new RuntimeException( 'Cannot generate encryption key: WordPress salts not available. Consider defining WP_ENCRYPTION_KEY.' );
 		}
 
 		return hash( 'sha256', $combined, true );
@@ -529,5 +550,4 @@ class SettingsEncryption {
 			throw new RuntimeException( "Encryption algorithm '{$this->algorithm}' is not supported" );
 		}
 	}
-
 }

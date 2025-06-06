@@ -20,17 +20,17 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Get or create the global encryption instance
  *
- * @param string|null $key             Optional. Custom encryption key. Only used on first call.
- * @param string      $prefix          Optional. Prefix for encrypted values. Only used on first call.
- * @param string      $constant_prefix Optional. Prefix for constant names. Only used on first call.
+ * @param string|null $key         Optional. Custom encryption key. Only used on first call.
+ * @param string      $prefix      Optional. Prefix for encrypted values. Only used on first call.
+ * @param string      $prefix_name Optional. Prefix for option and constant names. Only used on first call.
  *
  * @return SettingsEncryption
  */
-function get_encryption_instance( ?string $key = null, string $prefix = '__ENCRYPTED__', string $constant_prefix = '' ): SettingsEncryption {
+function get_encryption_instance( ?string $key = null, string $prefix = '__ENCRYPTED__', string $prefix_name = '' ): SettingsEncryption {
 	global $arraypress_encryption;
 
 	if ( ! $arraypress_encryption instanceof SettingsEncryption ) {
-		$arraypress_encryption = new SettingsEncryption( $key, $prefix, $constant_prefix );
+		$arraypress_encryption = new SettingsEncryption( $key, $prefix, $prefix_name );
 	}
 
 	return $arraypress_encryption;
@@ -105,17 +105,6 @@ function get_encrypted_option_info( string $option, string $default = '' ): arra
  */
 function is_option_constant_defined( string $option ): bool {
 	return get_encryption_instance()->is_constant_defined( $option );
-}
-
-/**
- * Get the constant name for an option
- *
- * @param string $option Option name
- *
- * @return string Constant name that would be checked
- */
-function get_option_constant_name( string $option ): string {
-	return get_encryption_instance()->get_constant_name( $option );
 }
 
 /**
@@ -218,15 +207,26 @@ function is_value_encrypted( string $value ): bool {
 }
 
 /**
- * Create a new encryption instance with specific configuration
- * Useful when you need multiple instances with different settings.
+ * Check if encryption is working properly
  *
- * @param string|null $key             Optional. Custom encryption key.
- * @param string      $prefix          Optional. Prefix for encrypted values.
- * @param string      $constant_prefix Optional. Prefix for constant names.
- *
- * @return SettingsEncryption
+ * @return bool Whether encryption/decryption is working
  */
-function create_encryption_instance( ?string $key = null, string $prefix = '__ENCRYPTED__', string $constant_prefix = '' ): SettingsEncryption {
-	return new SettingsEncryption( $key, $prefix, $constant_prefix );
+function test_encryption(): bool {
+	$test_value = 'test123';
+	$encrypted  = encrypt_value( $test_value );
+	if ( is_wp_error( $encrypted ) ) {
+		return false;
+	}
+	$decrypted = decrypt_value( $encrypted );
+
+	return ! is_wp_error( $decrypted ) && $decrypted === $test_value;
+}
+
+/**
+ * Check if a dedicated encryption key is defined
+ *
+ * @return bool Whether WP_ENCRYPTION_KEY constant is defined
+ */
+function has_dedicated_encryption_key(): bool {
+	return defined( 'WP_ENCRYPTION_KEY' ) && ! empty( WP_ENCRYPTION_KEY );
 }
