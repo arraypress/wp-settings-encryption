@@ -70,26 +70,45 @@ class SettingsEncryption {
 	private array $tracked_options = [];
 
 	/**
-	 * Constructor
+	 * Constructor - Clean and simple!
 	 *
+	 * @param string      $prefix         Prefix for options/constants (e.g., 'wc_r2')
 	 * @param string|null $key            Optional. Custom encryption key. If null, use WordPress salts.
-	 * @param string      $prefix         Optional. Prefix for encrypted values. Default '__ENCRYPTED__'.
-	 * @param string      $prefix_name    Optional. Prefix for option and constant names (e.g., 'wc_r2_'). Default
-	 *                                    empty.
-	 * @param bool        $auto_intercept Optional. Whether to automatically intercept get_option calls. Default false.
-	 *
-	 * @throws RuntimeException If OpenSSL extension is not available or the algorithm is not supported.
+	 * @param bool        $auto_intercept Optional. Whether to automatically intercept get_option calls. Default true.
 	 */
-	public function __construct( ?string $key = null, string $prefix = '__ENCRYPTED__', string $prefix_name = '', bool $auto_intercept = false ) {
+	public function __construct( string $prefix, ?string $key = null, bool $auto_intercept = true ) {
 		$this->key            = $key ? hash( 'sha256', $key, true ) : $this->get_wordpress_key();
-		$this->prefix         = $prefix;
-		$this->prefix_name    = $prefix_name;
+		$this->prefix_name    = $this->build_option_prefix( $prefix );
+		$this->prefix         = $this->build_encryption_prefix( $prefix );
 		$this->auto_intercept = $auto_intercept;
+
 		$this->validate_environment();
 
 		if ( $this->auto_intercept ) {
 			$this->setup_auto_interception();
 		}
+	}
+
+	/**
+	 * Build option prefix with underscore
+	 *
+	 * @param string $prefix Base prefix
+	 *
+	 * @return string Option prefix with underscore
+	 */
+	private function build_option_prefix( string $prefix ): string {
+		return $prefix . '_';
+	}
+
+	/**
+	 * Build encryption prefix for encrypted values
+	 *
+	 * @param string $prefix Base prefix
+	 *
+	 * @return string Encryption prefix
+	 */
+	private function build_encryption_prefix( string $prefix ): string {
+		return '__' . strtoupper( $prefix ) . '_ENCRYPTED__';
 	}
 
 	/**
@@ -661,4 +680,5 @@ class SettingsEncryption {
 			throw new RuntimeException( "Encryption algorithm '{$this->algorithm}' is not supported" );
 		}
 	}
+
 }
