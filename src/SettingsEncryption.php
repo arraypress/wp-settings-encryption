@@ -379,12 +379,12 @@ class SettingsEncryption {
 
 			return $base_desc . sprintf(
 					' <strong>%s</strong> <code>%s</code>',
-					__( 'Defined as constant:', 'your-textdomain' ),
+					__( 'Defined as constant:', 'arraypress' ),
 					$constant_name
 				);
 		}
 
-		return $base_desc . ' ' . __( '(stored encrypted in database)', 'your-textdomain' );
+		return $base_desc . ' ' . __( '(stored encrypted in database)', 'arraypress' );
 	}
 
 	/**
@@ -407,7 +407,7 @@ class SettingsEncryption {
 		if ( ! in_array( $option, $this->tracked_options, true ) ) {
 			$this->tracked_options[] = $option;
 			$full_option_name        = $this->get_full_option_name( $option );
-			add_filter( "pre_option_{$full_option_name}", [ $this, 'intercept_option_value' ], 10, 1 );
+			add_filter( "pre_option_{$full_option_name}", [ $this, 'intercept_option_value' ] );
 		}
 	}
 
@@ -431,13 +431,13 @@ class SettingsEncryption {
 		}
 
 		// Temporarily remove our filter to prevent infinite loop
-		remove_filter( current_filter(), [ $this, 'intercept_option_value' ], 10 );
+		remove_filter( current_filter(), [ $this, 'intercept_option_value' ] );
 
 		// Get the decrypted value using our method
 		$decrypted_value = $this->get_option( $base_name, '' );
 
 		// Re-add our filter
-		add_filter( current_filter(), [ $this, 'intercept_option_value' ], 10, 1 );
+		add_filter( current_filter(), [ $this, 'intercept_option_value' ] );
 
 		return $decrypted_value;
 	}
@@ -453,7 +453,7 @@ class SettingsEncryption {
 		// Set up filters for already tracked options
 		foreach ( $this->tracked_options as $option ) {
 			$full_option_name = $this->get_full_option_name( $option );
-			add_filter( "pre_option_{$full_option_name}", [ $this, 'intercept_option_value' ], 10, 1 );
+			add_filter( "pre_option_{$full_option_name}", [ $this, 'intercept_option_value' ] );
 		}
 	}
 
@@ -468,7 +468,7 @@ class SettingsEncryption {
 		// Remove filters for tracked options
 		foreach ( $this->tracked_options as $option ) {
 			$full_option_name = $this->get_full_option_name( $option );
-			remove_filter( "pre_option_{$full_option_name}", [ $this, 'intercept_option_value' ], 10 );
+			remove_filter( "pre_option_{$full_option_name}", [ $this, 'intercept_option_value' ] );
 		}
 	}
 
@@ -654,7 +654,7 @@ class SettingsEncryption {
 
 		// Fallback to wp_salt if no constants defined
 		if ( empty( $combined ) && function_exists( 'wp_salt' ) ) {
-			$combined = wp_salt( 'auth' ) . wp_salt( 'secure_auth' );
+			$combined = wp_salt() . wp_salt( 'secure_auth' );
 		}
 
 		// Final check
